@@ -42,6 +42,7 @@ namespace Style
         Resize     = 1 << 1, ///< Title bar + resizable border + maximize button
         Close      = 1 << 2, ///< Title bar + close button
         Fullscreen = 1 << 3, ///< Fullscreen mode (this flag and all others are mutually exclusive)
+        Maximize   = 1 << 4, ///< Fullscreen mode (this flag and all others are mutually exclusive)
 
         Default = Titlebar | Resize | Close ///< Default window style
     };

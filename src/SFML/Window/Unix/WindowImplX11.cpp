@@ -418,7 +418,8 @@ m_hiddenCursor   (0),
 m_keyRepeat      (true),
 m_previousSize   (-1, -1),
 m_useSizeHints   (false),
-m_fullscreen     ((style & Style::Fullscreen) != 0)
+m_fullscreen     ((style & Style::Fullscreen) != 0),
+m_maximize       ((style & Style::Maximize) != 0)
 {
     // Open a connection with the X server
     m_display = OpenDisplay();
@@ -542,6 +543,12 @@ m_fullscreen     ((style & Style::Fullscreen) != 0)
         setPosition(Vector2i(0, 0));
         setVideoMode(mode);
         switchToFullscreen();
+    }
+
+    if (m_maximize) {
+        setPosition(Vector2i(0, 0));
+        setVideoMode(mode);
+        switchToMaximize();
     }
 }
 
@@ -1318,6 +1325,61 @@ void WindowImplX11::switchToFullscreen()
     }
 }
 
+////////////////////////////////////////////////////////////
+void WindowImplX11::switchToMaximize()
+{
+    grabFocus();
+
+    if (ewmhSupported())
+    {
+        xcb_atom_t netWmBypassCompositor = getAtom("_NET_WM_BYPASS_COMPOSITOR");
+
+        if (netWmBypassCompositor)
+        {
+            static const Uint32 bypassCompositor = 1;
+
+            // Not being able to bypass the compositor is not a fatal error
+            if (!changeWindowProperty(netWmBypassCompositor, XCB_ATOM_CARDINAL, 32, 1, &bypassCompositor))
+                err() << "xcb_change_property failed, unable to set _NET_WM_BYPASS_COMPOSITOR" << std::endl;
+        }
+
+        xcb_atom_t netWmState = getAtom("_NET_WM_STATE", true);
+        xcb_atom_t netWmStateMaximizedVert = getAtom("_NET_WM_STATE_MAXIMIZED_VERT", false);
+        xcb_atom_t netWmStateMaximizedHorz = getAtom("_NET_WM_STATE_MAXIMIZED_HORZ", false);
+
+        if (!netWmState || !netWmStateMaximizedVert || !netWmStateMaximizedHorz)
+        {
+            err() << "Setting maximize failed. Could not get required atoms" << std::endl;
+            return;
+        }
+
+        xcb_client_message_event_t event;
+
+        event.response_type = XCB_CLIENT_MESSAGE;
+        event.window = m_window;
+        event.format = 32;
+        event.sequence = 0;
+        event.type = netWmState;
+        event.data.data32[0] = 1; // _NET_WM_STATE_ADD
+        event.data.data32[1] = netWmStateMaximizedVert;
+        event.data.data32[2] = netWmStateMaximizedHorz; // No second property
+        event.data.data32[3] = 1; // Normal window
+
+        ScopedXcbPtr<xcb_generic_error_t> wmStateError(xcb_request_check(
+            m_connection,
+            xcb_send_event_checked(
+                m_connection,
+                0,
+                XCBDefaultRootWindow(m_connection),
+                XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY | XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT,
+                reinterpret_cast<char*>(&event)
+            )
+        ));
+
+        if (wmStateError)
+            err() << "Setting maximize failed. Could not send \"_NET_WM_STATE\" event" << std::endl;
+    }
+}
 
 ////////////////////////////////////////////////////////////
 void WindowImplX11::setProtocols()
@@ -1971,6 +2033,10 @@ bool WindowImplX11::processEvent(XEvent windowEvent)
             if (m_fullscreen)
                 switchToFullscreen();
 
+            if (m_maximize)
+                switchToMaximize();
+
+            setPosition(Vector2i(0, 0));
             XSync(m_display, True); // Discard remaining events
             break;
         }
